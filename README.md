@@ -1,91 +1,78 @@
-# WSL Recovery & Selective Migration Guide
+# WSL Recovery & Selective Migration Playbook
 
-### Recover selected repositories/files from OLD WSL Ubuntu → NEW WSL Ubuntu (stored on D drive)
+## Purpose
 
-> Personal recovery and migration guide after moving from old laptop → new laptop.
->
-> Goal:
-> Keep a clean Ubuntu environment on the new laptop while selectively importing only needed projects from the old Ubuntu.
+This guide is used after:
+
+- Fresh Windows installation
+- New laptop setup
+- WSL reinstall
+- Recovery from old Ubuntu VHDX
+
+Goal:
+
+Recover selected repositories from an old Ubuntu WSL installation into a fresh Ubuntu installation while keeping the active Ubuntu filesystem on D drive.
 
 ---
 
-# Final Architecture
-
-Current setup:
+# Final Desired Architecture
 
 ```text
-NEW SSD
-
-C:
-├── Windows
-└── Small system data
-
 D:
 ├── WSL
 │   └── Ubuntu
-│       └── ext4.vhdx   ← ACTIVE Ubuntu filesystem
+│       └── ext4.vhdx      ← ACTIVE Ubuntu
 │
-└── WSLBackup
+└── WSL-OLD
+    └── Ubuntu
+        └── ext4.vhdx      ← RECOVERY SOURCE
 ```
 
-Inside active Ubuntu:
+After migration:
 
 ```text
-/home/rawad
-├── nrc
-├── nrctest
-├── node-readiness-controller
-└── pipecd
-```
-
-Old SSD:
-
-```text
-F:
-└── Users
-    └── Rawad
-        └── AppData
-            └── Local
-                └── wsl
-                    └── {GUID}
-                        └── ext4.vhdx
-```
-
-Imported as:
-
-```text
-Ubuntu-Old
+D:
+└── WSL
+    └── Ubuntu
+        └── ext4.vhdx
 ```
 
 ---
 
-# Important Concepts
-
-Current active environment:
-
-```bash
-wsl -d Ubuntu
-```
-
-Source/archive environment:
-
-```bash
-wsl -d Ubuntu-Old
-```
-
-Never work permanently inside:
-
-```text
-Ubuntu-Old
-```
-
-Use it only to recover files.
-
----
-
-# Verify Current Setup
+# Phase 1 — Verify Current WSL State
 
 Open PowerShell:
+
+```powershell
+wsl -l -v
+```
+
+Example:
+
+```text
+NAME              STATE           VERSION
+docker-desktop    Running         2
+```
+
+This means Ubuntu is not installed yet.
+
+---
+
+# Phase 2 — Mount Old Ubuntu
+
+Assume old Ubuntu filesystem exists at:
+
+```text
+D:\WSL-OLD\Ubuntu\ext4.vhdx
+```
+
+Register it:
+
+```powershell
+wsl --import-in-place Ubuntu-Old "D:\WSL-OLD\Ubuntu\ext4.vhdx"
+```
+
+Verify:
 
 ```powershell
 wsl -l -v
@@ -94,69 +81,420 @@ wsl -l -v
 Expected:
 
 ```text
-NAME              STATE
-Ubuntu            Running
-Ubuntu-Old        Stopped
-docker-desktop    Running
+NAME
+Ubuntu-Old
+docker-desktop
+```
+
+Open old Ubuntu:
+
+```powershell
+wsl -d Ubuntu-Old
+```
+
+Verify:
+
+```bash
+pwd
+ls /home/rawad
+```
+
+Expected:
+
+```text
+node-readiness-controller
+nrc
+nrctest
+pipecd
+```
+
+If repositories appear, recovery source is confirmed.
+
+---
+
+# Phase 3 — Install Fresh Ubuntu
+
+Install Ubuntu:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+Create Linux user:
+
+```text
+rawad
+```
+
+Verify:
+
+```powershell
+wsl -l -v
+```
+
+Expected:
+
+```text
+Ubuntu
+Ubuntu-Old
+docker-desktop
 ```
 
 ---
 
-# Storage Rules
+# Phase 4 — Move Ubuntu To D Drive
 
-Inside Ubuntu:
+By default Ubuntu installs on C drive.
 
-```bash
-~/repo
+Export:
+
+```powershell
+wsl --export Ubuntu D:\ubuntu.tar
 ```
 
-Stored physically in:
+Shutdown WSL:
+
+```powershell
+wsl --shutdown
+```
+
+Remove Ubuntu from C drive:
+
+```powershell
+wsl --unregister Ubuntu
+```
+
+Create destination:
+
+```powershell
+mkdir D:\WSL\Ubuntu
+```
+
+Import Ubuntu to D drive:
+
+```powershell
+wsl --import Ubuntu D:\WSL\Ubuntu D:\ubuntu.tar --version 2
+```
+
+Delete temporary archive:
+
+```powershell
+del D:\ubuntu.tar
+```
+
+Verify:
+
+```powershell
+Get-ChildItem D:\WSL\Ubuntu
+```
+
+Expected:
 
 ```text
-D:\WSL\Ubuntu\ext4.vhdx
+ext4.vhdx
 ```
 
-Consumes:
+---
+
+# Phase 5 — Verify Both Distros
+
+PowerShell:
+
+```powershell
+wsl -l -v
+```
+
+Expected:
 
 ```text
-D drive
+Ubuntu
+Ubuntu-Old
+docker-desktop
 ```
 
-Examples:
+---
+
+# Phase 6 — Open Two Terminals
+
+## Terminal 1 (Old Ubuntu)
+
+Open:
+
+```powershell
+wsl -d Ubuntu-Old
+```
+
+Verify:
 
 ```bash
-git clone
-npm install
-pnpm install
+pwd
+```
+
+Expected:
+
+```text
+/home/rawad
+```
+
+Go home:
+
+```bash
+cd /home/rawad
+```
+
+---
+
+## Terminal 2 (New Ubuntu)
+
+Open:
+
+```powershell
+wsl -d Ubuntu
+```
+
+Verify:
+
+```bash
+pwd
+```
+
+Expected:
+
+```text
+/home/rawad
+```
+
+Keep both terminals open.
+
+---
+
+# Phase 7 — Create Archive In Old Ubuntu
+
+## Terminal 1 (Ubuntu-Old)
+
+Create archive:
+
+```bash
+tar -czf /tmp/repos.tar.gz \
+nrc \
+nrctest \
+node-readiness-controller \
+pipecd
+```
+
+Verify:
+
+```bash
+ls -lh /tmp/repos.tar.gz
+```
+
+Expected:
+
+```text
+repos.tar.gz
+```
+
+Copy archive to D drive:
+
+```bash
+cp /tmp/repos.tar.gz /mnt/d/
+```
+
+Verify:
+
+```bash
+ls -lh /mnt/d/repos.tar.gz
+```
+
+---
+
+# Phase 8 — Import Into New Ubuntu
+
+## Terminal 2 (Ubuntu)
+
+Copy archive:
+
+```bash
+cp /mnt/d/repos.tar.gz ~/
+```
+
+Verify:
+
+```bash
+ls -lh ~/repos.tar.gz
+```
+
+Extract:
+
+```bash
+cd ~
+tar -xzf repos.tar.gz
+```
+
+Verify:
+
+```bash
+ls
+```
+
+Expected:
+
+```text
+node-readiness-controller
+nrc
+nrctest
+pipecd
+```
+
+---
+
+# Phase 9 — Fix Ownership
+
+Inside NEW Ubuntu:
+
+```bash
+sudo chown -R rawad:rawad \
+~/nrc \
+~/nrctest \
+~/node-readiness-controller \
+~/pipecd
+```
+
+---
+
+# Phase 10 — Verify Repositories
+
+Inside NEW Ubuntu:
+
+```bash
+cd ~/nrc
+git status
+```
+
+```bash
+cd ~/nrctest
+git status
+```
+
+```bash
+cd ~/node-readiness-controller
+git status
+```
+
+```bash
+cd ~/pipecd
+git status
+```
+
+Expected:
+
+```text
+On branch ...
+nothing to commit, working tree clean
+```
+
+---
+
+# Phase 11 — Verify Cursor
+
+```bash
+cd ~/nrc
 cursor .
 ```
 
-All grow D drive.
+```bash
+cd ~/node-readiness-controller
+cursor .
+```
+
+Verify projects open correctly.
 
 ---
 
-Inside:
+# Phase 12 — Cleanup Temporary Files
+
+## Terminal 2 (Ubuntu)
+
+Remove archive:
 
 ```bash
-/mnt/c
+rm ~/repos.tar.gz
 ```
-
-Consumes:
-
-```text
-C drive
-```
-
-Avoid development there.
 
 ---
 
-# Daily Workflow
+## Terminal 1 (Ubuntu-Old)
 
-Open terminal:
+Remove archive:
 
 ```bash
-wsl
+rm /tmp/repos.tar.gz
+```
+
+---
+
+Remove Windows copy:
+
+```bash
+rm /mnt/d/repos.tar.gz
+```
+
+---
+
+# Phase 13 — Keep Recovery Ubuntu
+
+Keep Ubuntu-Old for several days.
+
+Use:
+
+```powershell
+wsl -d Ubuntu
+```
+
+for daily work.
+
+Verify:
+
+- Git works
+- Cursor works
+- SSH works
+- Docker works
+- No missing repositories
+
+---
+
+# Phase 14 — Remove Recovery Ubuntu
+
+After confirming everything:
+
+Shutdown:
+
+```powershell
+wsl --shutdown
+```
+
+Remove recovery distro:
+
+```powershell
+wsl --unregister Ubuntu-Old
+```
+
+Optional:
+
+Delete recovery files:
+
+```powershell
+Remove-Item D:\WSL-OLD -Recurse
+```
+
+---
+
+# Final Daily Workflow
+
+Open Ubuntu:
+
+```powershell
+wsl -d Ubuntu
 ```
 
 Open project:
@@ -166,7 +504,7 @@ cd ~/nrc
 cursor .
 ```
 
-Examples:
+Other repositories:
 
 ```bash
 cd ~/nrctest
@@ -178,391 +516,27 @@ cd ~/node-readiness-controller
 cursor .
 ```
 
----
-
-# Selective Migration Workflow
-
-Use when you want:
-
-```text
-folder
-repo
-file
-workspace
-config
-```
-
-from OLD Ubuntu.
-
-Examples:
-
-```text
-metaflow
-builder
-research
-node-readiness-controller
-```
-
----
-
-# METHOD A — Move ONE Folder / Repo
-
-Example:
-
-```text
-metaflow
-```
-
----
-
-## STEP 1 — Open Windows Terminal
-
-Open:
-
-```text
-Windows Terminal
-```
-
-Open LEFT tab.
-
----
-
-## STEP 2 — Open OLD Ubuntu
-
-Run:
-
 ```bash
-wsl -d Ubuntu-Old
-```
-
-Go home:
-
-```bash
-cd ~
-pwd
-ls
-```
-
-Expected:
-
-```text
-/home/rawad
-```
-
----
-
-## STEP 3 — Create Archive
-
-Replace folder name.
-
-Run:
-
-```bash
-tar -czf /tmp/metaflow.tar.gz metaflow
-```
-
-Wait.
-
-Finished when prompt returns.
-
-Verify:
-
-```bash
-ls -lh /tmp/metaflow.tar.gz
-```
-
----
-
-## STEP 4 — Move Archive To Windows
-
-Run:
-
-```bash
-cp /tmp/metaflow.tar.gz /mnt/c/Users/Rawad/
-```
-
-Verify:
-
-```bash
-ls -lh /mnt/c/Users/Rawad/metaflow.tar.gz
-```
-
----
-
-## STEP 5 — Open SECOND Terminal Tab
-
-Press:
-
-```text
-+
-```
-
-Run:
-
-```bash
-wsl -d Ubuntu
-```
-
----
-
-## STEP 6 — Go Home
-
-Run:
-
-```bash
-cd ~
-pwd
-```
-
-Expected:
-
-```text
-/home/rawad
-```
-
----
-
-## STEP 7 — Copy Archive Into NEW Ubuntu
-
-Run:
-
-```bash
-cp /mnt/c/Users/Rawad/metaflow.tar.gz ~/
-```
-
----
-
-## STEP 8 — Extract
-
-Run:
-
-```bash
-tar -xzf metaflow.tar.gz
-```
-
-Verify:
-
-```bash
-ls
-```
-
-Expected:
-
-```text
-metaflow
-```
-
----
-
-## STEP 9 — Cleanup
-
-NEW Ubuntu:
-
-```bash
-rm ~/metaflow.tar.gz
-```
-
-OLD Ubuntu:
-
-```bash
-rm /tmp/metaflow.tar.gz
-```
-
-Optional:
-
-```bash
-rm /mnt/c/Users/Rawad/metaflow.tar.gz
-```
-
-Done.
-
----
-
-# METHOD B — Move MULTIPLE Folders
-
-Example:
-
-```text
-folder1
-folder2
-folder3
-```
-
----
-
-## LEFT TAB → OLD Ubuntu
-
-Run:
-
-```bash
-wsl -d Ubuntu-Old
-```
-
-Create archive:
-
-```bash
-tar -czf /tmp/repos.tar.gz \
-folder1 \
-folder2 \
-folder3
-```
-
-Verify:
-
-```bash
-ls -lh /tmp/repos.tar.gz
-```
-
-Copy:
-
-```bash
-cp /tmp/repos.tar.gz /mnt/c/Users/Rawad/
-```
-
----
-
-## RIGHT TAB → NEW Ubuntu
-
-Run:
-
-```bash
-wsl -d Ubuntu
-```
-
-Copy:
-
-```bash
-cp /mnt/c/Users/Rawad/repos.tar.gz ~/
-```
-
-Extract:
-
-```bash
-tar -xzf repos.tar.gz
-```
-
-Verify:
-
-```bash
-ls
-```
-
-Cleanup:
-
-```bash
-rm ~/repos.tar.gz
-rm /mnt/c/Users/Rawad/repos.tar.gz
-```
-
-Done.
-
----
-
-# Move ONLY Specific Files
-
-Example:
-
-```text
-README.md
-.env
-notes.txt
-```
-
-OLD Ubuntu:
-
-```bash
-tar -czf /tmp/files.tar.gz \
-README.md \
-.env \
-notes.txt
-```
-
-Copy:
-
-```bash
-cp /tmp/files.tar.gz /mnt/c/Users/Rawad/
-```
-
-NEW Ubuntu:
-
-```bash
-cp /mnt/c/Users/Rawad/files.tar.gz ~/
-tar -xzf files.tar.gz
-```
-
----
-
-# Verify Repository Health
-
-Open:
-
-```bash
-cd ~/nrc
+cd ~/pipecd
 cursor .
 ```
 
-Inside terminal:
-
-```bash
-git status
-```
-
-Expected:
-
-```text
-On branch ...
-nothing to commit
-```
-
-Verify remote:
-
-```bash
-git remote -v
-```
-
 ---
 
-# Check WSL Uses D Drive
+# Backup Rule
 
-PowerShell:
+Before any future Windows reinstall:
 
 ```powershell
-dir D:\WSL\Ubuntu
+wsl --export Ubuntu D:\Backups\ubuntu-backup.tar
 ```
 
-Expected:
+Store:
 
 ```text
-ext4.vhdx
+ubuntu-backup.tar
 ```
 
-Monitor size growth.
+on another drive.
 
----
-
-# Check Disk Usage
-
-Inside Ubuntu:
-
-```bash
-df -h ~
-```
-
-See Linux filesystem usage.
-
----
-
-# Cleanup Old Ubuntu (Optional)
-
-Only after confirming:
-
-- all repos recovered
-- SSH works
-- Cursor works
-- no missing files
-
-Remove:
-
-```powershell
-wsl --unregister Ubuntu-Old
-```
+This single file can restore the entire Ubuntu environment later.
